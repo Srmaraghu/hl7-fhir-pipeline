@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: fhirdb
+      POSTGRES_USER: fhiruser
+      POSTGRES_PASSWORD: fhirpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - hl7_pg_data:/var/lib/postgresql/data
+
+volumes:
+  hl7_pg_data:
