@@ -134,24 +134,28 @@ def insert_patient(patient_id: str, fhir_patient: dict) -> str:
 
     if row:
         existing_id = row[0]
-        print(f"[DB] Patient already exists: {patient_id} (id={existing_id})")
+        print(f"[DB] Patient already exists (id={existing_id})")
         return existing_id
 
     # assign a new UUID as the FHIR logical id
     fhir_id = str(uuid.uuid4())
     fhir_patient["id"] = fhir_id
 
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO patients (id, resource_type, resource)
-            VALUES (%s, 'Patient', %s)
-            ON CONFLICT (id) DO NOTHING;
-            """,
-            (fhir_id, json.dumps(fhir_patient))
-        )
-    conn.commit()
-    print(f"[DB] Patient inserted: {patient_id} (id={fhir_id})")
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO patients (id, resource_type, resource)
+                VALUES (%s, 'Patient', %s)
+                ON CONFLICT (id) DO NOTHING;
+                """,
+                (fhir_id, json.dumps(fhir_patient))
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    print(f"[DB] Patient inserted (id={fhir_id})")
     return fhir_id
 
 
@@ -175,21 +179,25 @@ def insert_observation(
     fhir_obs["subject"] = {"reference": f"Patient/{patient_fhir_id}"}
 
     conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO observations
-                (id, patient_id, resource_type, resource, message_control_id, loinc_code)
-            VALUES (%s, %s, 'Observation', %s, %s, %s)
-            ON CONFLICT (patient_id, message_control_id, loinc_code) DO NOTHING;
-            """,
-            (obs_id, patient_fhir_id, json.dumps(fhir_obs), message_control_id, loinc_code)
-        )
-        if cur.rowcount == 1:
-            print(f"[DB] Observation inserted: {loinc_code} ({description})")
-        else:
-            print(f"[DB] Observation skipped (already exists): {loinc_code} ({description})")
-    conn.commit()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO observations
+                    (id, patient_id, resource_type, resource, message_control_id, loinc_code)
+                VALUES (%s, %s, 'Observation', %s, %s, %s)
+                ON CONFLICT (patient_id, message_control_id, loinc_code) DO NOTHING;
+                """,
+                (obs_id, patient_fhir_id, json.dumps(fhir_obs), message_control_id, loinc_code)
+            )
+            if cur.rowcount == 1:
+                print(f"[DB] Observation inserted: {loinc_code} ({description})")
+            else:
+                print(f"[DB] Observation skipped (already exists): {loinc_code} ({description})")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def insert_dead_letter(filename: str, reason_code: str, raw_message: str = ""):

@@ -96,7 +96,7 @@ def run():
                     fhir_obs=fhir_obs,
                 )
 
-            print(f"  VALID - patient {mr_number} (id={patient_fhir_id}), {len(fhir_observations)} observation(s) saved")
+            print(f"  VALID - patient saved (id={patient_fhir_id}), {len(fhir_observations)} observation(s) saved")
             valid += 1
 
         except Exception as e:
