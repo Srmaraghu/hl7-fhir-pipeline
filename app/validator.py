@@ -1,12 +1,20 @@
 """
-Vaidates parsed PID and OBX data before we attempt any FHIR transformation
+validator.py
+
+Validates parsed PID and OBX data before we attempt any FHIR transformation
 or database insert.
-Each check returns a tuple: (is_valid: bool, reason_code: str)
-Reason codes (stored in dead_letter table):
-    MISSING_PATIENT_ID   — PID-3 is empty
-    INVALID_DOB          — PID-7 is not a real date or is in the future
-    INVALID_GENDER       — PID-8 is not a recognised HL7 gender code
-    MISSING_LOINC_CODE   — one or more OBX segments have no LOINC code
+
+Each check returns a tuple: (is_valid: bool, message: str)
+The message format is "REASON_CODE: human readable detail".
+The prefix before ":" is the reason code stored in dead_letter.reason_code.
+
+Reason codes:
+    MISSING_PATIENT_ID          — PID-3 is empty
+    MISSING_MESSAGE_CONTROL_ID  — MSH-10 is empty (breaks deduplication)
+    MISSING_DOB                 — PID-7 is empty
+    INVALID_DOB                 — PID-7 is not a real date or is in the future
+    INVALID_GENDER              — PID-8 is not a recognised HL7 gender code
+    MISSING_LOINC_CODE          — one or more OBX segments have no LOINC code
 """
 
 from datetime import datetime
@@ -24,25 +32,37 @@ def validate(pid: dict, obx_list: List[dict]) -> tuple:
     Returns:
         (True, "OK")                        if everything passes
         (False, "REASON_CODE: description") on first failure
+
+    The caller should split on ":" to separate the reason code
+    (for DB storage) from the full description (for logging).
     """
     checks = [
         _check_patient_id,
+        _check_message_control_id,
         _check_dob,
         _check_gender,
     ]
 
-    # Run PID checks
     for check in checks:
         is_valid, reason = check(pid)
         if not is_valid:
             return False, reason
 
-    # Run OBX checks
     is_valid, reason = _check_loinc_codes(obx_list)
     if not is_valid:
         return False, reason
 
     return True, "OK"
+
+
+def extract_reason_code(reason: str) -> str:
+    """
+    Pull the reason code prefix from a full reason string.
+
+    e.g. "MISSING_PATIENT_ID: PID-3 is empty" → "MISSING_PATIENT_ID"
+         "OK"                                  → "OK"
+    """
+    return reason.split(":")[0].strip()
 
 
 # ── individual checks ─────────────────────────────────────────────────────────
@@ -51,6 +71,17 @@ def _check_patient_id(pid: dict) -> tuple:
     """PID-3 must not be empty."""
     if not pid.get("patient_id", "").strip():
         return False, "MISSING_PATIENT_ID: PID-3 is empty"
+    return True, "OK"
+
+
+def _check_message_control_id(pid: dict) -> tuple:
+    """
+    MSH-10 must not be empty.
+    Without it, all observations would share an empty message_control_id,
+    breaking the UNIQUE constraint and silently skipping inserts on re-runs.
+    """
+    if not pid.get("message_control_id", "").strip():
+        return False, "MISSING_MESSAGE_CONTROL_ID: MSH-10 is empty — deduplication will fail"
     return True, "OK"
 
 
@@ -64,7 +95,6 @@ def _check_dob(pid: dict) -> tuple:
     if not dob:
         return False, "MISSING_DOB: PID-7 is empty"
 
-    # Must be at least 8 characters (YYYYMMDD)
     if len(dob) < 8:
         return False, f"INVALID_DOB: too short — got '{dob}'"
 
@@ -73,11 +103,9 @@ def _check_dob(pid: dict) -> tuple:
     except ValueError:
         return False, f"INVALID_DOB: '{dob}' is not a real date"
 
-    # Reject future dates
     if dt > datetime.now():
         return False, f"INVALID_DOB: '{dob}' is in the future"
 
-    # Reject implausible years
     if dt.year < 1900:
         return False, f"INVALID_DOB: year {dt.year} is implausible"
 
@@ -85,10 +113,9 @@ def _check_dob(pid: dict) -> tuple:
 
 
 def _check_gender(pid: dict) -> tuple:
-    """PID-8 must be a recognised HL7 gender code (or empty is acceptable)."""
+    """PID-8 must be a recognised HL7 gender code (empty is allowed)."""
     gender = pid.get("gender", "").strip().upper()
 
-    # Empty gender is a warning but we allow it through
     if not gender:
         return True, "OK"
 
@@ -101,8 +128,7 @@ def _check_gender(pid: dict) -> tuple:
 def _check_loinc_codes(obx_list: List[dict]) -> tuple:
     """
     Every OBX segment must have a non-empty LOINC code.
-    If there are no OBX segments at all, we allow it through
-    (some ADT messages have no observations).
+    No OBX segments at all is allowed (some ADT messages have none).
     """
     if not obx_list:
         return True, "OK"

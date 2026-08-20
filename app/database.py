@@ -34,6 +34,8 @@ def close_connection():
 def create_tables():
     """
     Create patients, observations, and dead_letter tables if they don't exist yet.
+    Also runs lightweight migrations for existing installs (adds message_control_id
+    to observations if it's missing from a previous schema version).
     Called once at startup.
     """
     conn = get_connection()
@@ -41,8 +43,8 @@ def create_tables():
         cur.execute("""
             CREATE TABLE IF NOT EXISTS patients (
                 id          SERIAL PRIMARY KEY,
-                patient_id  TEXT UNIQUE NOT NULL,   -- MR number from PID-3
-                fhir_data   JSONB NOT NULL,          -- full FHIR Patient resource
+                patient_id  TEXT UNIQUE NOT NULL,
+                fhir_data   JSONB NOT NULL,
                 created_at  TIMESTAMP DEFAULT NOW()
             );
         """)
@@ -50,21 +52,26 @@ def create_tables():
             CREATE TABLE IF NOT EXISTS observations (
                 id                  SERIAL PRIMARY KEY,
                 patient_id          TEXT NOT NULL,
-                message_control_id  TEXT NOT NULL,           -- MSH-10, used for deduplication
+                message_control_id  TEXT NOT NULL,
                 loinc_code          TEXT,
                 description         TEXT,
                 fhir_data           JSONB NOT NULL,
                 created_at          TIMESTAMP DEFAULT NOW(),
                 FOREIGN KEY (patient_id) REFERENCES patients(patient_id),
-                UNIQUE (patient_id, message_control_id, loinc_code)  -- prevents duplicate inserts
+                UNIQUE (patient_id, message_control_id, loinc_code)
             );
+        """)
+        # Migration: add message_control_id to observations if this is an older install
+        cur.execute("""
+            ALTER TABLE observations
+                ADD COLUMN IF NOT EXISTS message_control_id TEXT;
         """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS dead_letter (
                 id           SERIAL PRIMARY KEY,
-                filename     TEXT NOT NULL,          -- which .hl7 file failed
-                reason_code  TEXT NOT NULL,          -- e.g. MISSING_PATIENT_ID
-                raw_message  TEXT,                   -- the original HL7 text
+                filename     TEXT NOT NULL,
+                reason_code  TEXT NOT NULL,
+                raw_message  TEXT,
                 created_at   TIMESTAMP DEFAULT NOW()
             );
         """)
@@ -96,6 +103,7 @@ def insert_observation(patient_id: str, message_control_id: str, loinc_code: str
     Insert a FHIR Observation resource.
     ON CONFLICT DO NOTHING means re-running the pipeline won't create duplicates.
     The unique key is (patient_id, message_control_id, loinc_code).
+    Logs whether the row was actually inserted or skipped (already exists).
     """
     conn = get_connection()
     with conn.cursor() as cur:
@@ -107,8 +115,11 @@ def insert_observation(patient_id: str, message_control_id: str, loinc_code: str
             """,
             (patient_id, message_control_id, loinc_code, description, json.dumps(fhir_obs))
         )
+        if cur.rowcount == 1:
+            print(f"[DB] Observation inserted: {loinc_code} ({description})")
+        else:
+            print(f"[DB] Observation skipped (already exists): {loinc_code} ({description})")
     conn.commit()
-    print(f"[DB] Observation inserted: {loinc_code} ({description})")
 
 def insert_dead_letter(filename: str, reason_code: str, raw_message: str = ""):
     """
