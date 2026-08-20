@@ -71,6 +71,8 @@ def create_tables():
         """)
 
         # ── observations: matches fhir-patient-api/init.sql exactly ──────────
+        # obx_sequence (OBX-1) added to the conflict key so two observations
+        # with the same LOINC in one message are stored as distinct rows.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS observations (
                 id                  TEXT        PRIMARY KEY,
@@ -80,9 +82,10 @@ def create_tables():
                 -- pipeline-only dedup columns (not present in API schema, added safely)
                 message_control_id  TEXT,
                 loinc_code          TEXT,
+                obx_sequence        TEXT,
                 created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                UNIQUE (patient_id, message_control_id, loinc_code)
+                UNIQUE (patient_id, message_control_id, obx_sequence)
             );
         """)
         cur.execute("""
@@ -109,95 +112,89 @@ def create_tables():
     print("[DB] Tables ready.")
 
 
-def insert_patient(patient_id: str, fhir_patient: dict) -> str:
-    """
-    Insert a FHIR Patient resource using the shared schema.
-
-    The patient's MR number (PID-3) is used as a stable lookup key via
-    the resource JSONB, but the primary key is a UUID — matching how
-    fhir-patient-api creates patients.
-
-    Returns the UUID id assigned to this patient.
-    """
-    conn = get_connection()
-
-    # check if a patient with this MR number already exists
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id FROM patients
-            WHERE resource->'identifier'->0->>'value' = %s
-            """,
-            (patient_id,)
-        )
-        row = cur.fetchone()
-
-    if row:
-        existing_id = row[0]
-        print(f"[DB] Patient already exists (id={existing_id})")
-        return existing_id
-
-    # assign a new UUID as the FHIR logical id
-    fhir_id = str(uuid.uuid4())
-    fhir_patient["id"] = fhir_id
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO patients (id, resource_type, resource)
-                VALUES (%s, 'Patient', %s)
-                ON CONFLICT (id) DO NOTHING;
-                """,
-                (fhir_id, json.dumps(fhir_patient))
-            )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    print(f"[DB] Patient inserted (id={fhir_id})")
-    return fhir_id
-
-
-def insert_observation(
-    patient_fhir_id: str,
+def persist_message(
+    mr_number: str,
+    fhir_patient: dict,
     message_control_id: str,
-    loinc_code: str,
-    description: str,
-    fhir_obs: dict,
-):
+    observations: list,
+) -> str:
     """
-    Insert a FHIR Observation resource using the shared schema.
+    Persist a complete HL7 message — patient + all observations — in a single
+    transaction. Either everything commits or nothing does.
 
-    patient_fhir_id is the UUID returned by insert_patient() — the actual
-    primary key in the patients table, not the MR number.
+    observations: list of dicts, each with keys:
+        fhir_obs, loinc_code, obx_sequence, description
+
+    Returns the patient's FHIR UUID.
     """
-    obs_id = str(uuid.uuid4())
-    fhir_obs["id"] = obs_id
-
-    # link observation back to patient using FHIR reference format
-    fhir_obs["subject"] = {"reference": f"Patient/{patient_fhir_id}"}
-
     conn = get_connection()
+
     try:
         with conn.cursor() as cur:
+            # ── patient: look up or insert ────────────────────────────────────
             cur.execute(
                 """
-                INSERT INTO observations
-                    (id, patient_id, resource_type, resource, message_control_id, loinc_code)
-                VALUES (%s, %s, 'Observation', %s, %s, %s)
-                ON CONFLICT (patient_id, message_control_id, loinc_code) DO NOTHING;
+                SELECT id FROM patients
+                WHERE resource->'identifier'->0->>'value' = %s
                 """,
-                (obs_id, patient_fhir_id, json.dumps(fhir_obs), message_control_id, loinc_code)
+                (mr_number,)
             )
-            if cur.rowcount == 1:
-                print(f"[DB] Observation inserted: {loinc_code} ({description})")
+            row = cur.fetchone()
+
+            if row:
+                patient_fhir_id = row[0]
+                print(f"[DB] Patient already exists (id={patient_fhir_id})")
             else:
-                print(f"[DB] Observation skipped (already exists): {loinc_code} ({description})")
+                patient_fhir_id = str(uuid.uuid4())
+                fhir_patient["id"] = patient_fhir_id
+                cur.execute(
+                    """
+                    INSERT INTO patients (id, resource_type, resource)
+                    VALUES (%s, 'Patient', %s)
+                    ON CONFLICT (id) DO NOTHING;
+                    """,
+                    (patient_fhir_id, json.dumps(fhir_patient))
+                )
+                print(f"[DB] Patient inserted (id={patient_fhir_id})")
+
+            # ── observations: all in the same transaction ─────────────────────
+            for obs in observations:
+                fhir_obs       = obs["fhir_obs"]
+                loinc_code     = obs["loinc_code"]
+                obx_sequence   = obs["obx_sequence"]
+                description    = obs["description"]
+
+                obs_id = str(uuid.uuid4())
+                fhir_obs["id"] = obs_id
+                fhir_obs["subject"] = {"reference": f"Patient/{patient_fhir_id}"}
+
+                cur.execute(
+                    """
+                    INSERT INTO observations
+                        (id, patient_id, resource_type, resource,
+                         message_control_id, loinc_code, obx_sequence)
+                    VALUES (%s, %s, 'Observation', %s, %s, %s, %s)
+                    ON CONFLICT (patient_id, message_control_id, obx_sequence)
+                    DO NOTHING;
+                    """,
+                    (
+                        obs_id, patient_fhir_id, json.dumps(fhir_obs),
+                        message_control_id, loinc_code, obx_sequence,
+                    )
+                )
+                if cur.rowcount == 1:
+                    print(f"[DB] Observation inserted: {loinc_code} ({description})")
+                else:
+                    print(f"[DB] Observation skipped (already exists): {loinc_code} ({description})")
+
+        # single commit for the whole message
         conn.commit()
+
     except Exception:
         conn.rollback()
         raise
+
+    return patient_fhir_id
 
 
 def insert_dead_letter(filename: str, reason_code: str, raw_message: str = ""):

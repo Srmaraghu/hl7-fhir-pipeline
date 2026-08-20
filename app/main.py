@@ -23,8 +23,7 @@ from app.transformer import pid_to_fhir_patient, obx_list_to_fhir_observations
 from app.validator import validate, extract_reason_code
 from app.database import (
     create_tables,
-    insert_patient,
-    insert_observation,
+    persist_message,
     insert_dead_letter,
     close_connection,
 )
@@ -81,20 +80,26 @@ def run():
             fhir_patient      = pid_to_fhir_patient(pid_data)
             fhir_observations = obx_list_to_fhir_observations(obx_data)
 
-            # Step 4: save to DB
-            # insert_patient returns the UUID fhir_id used as the PK
+            # Step 4: save to DB — single transaction for the whole message
             mr_number          = pid_data.get("patient_id", "")
             message_control_id = pid_data.get("message_control_id", "")
-            patient_fhir_id    = insert_patient(mr_number, fhir_patient)
 
-            for obs, fhir_obs in zip(obx_data, fhir_observations):
-                insert_observation(
-                    patient_fhir_id=patient_fhir_id,
-                    message_control_id=message_control_id,
-                    loinc_code=obs.get("loinc_code", ""),
-                    description=obs.get("description", ""),
-                    fhir_obs=fhir_obs,
-                )
+            obs_payloads = [
+                {
+                    "fhir_obs":    fhir_obs,
+                    "loinc_code":  obs.get("loinc_code", ""),
+                    "obx_sequence": obs.get("obx_sequence", str(i + 1)),
+                    "description": obs.get("description", ""),
+                }
+                for i, (obs, fhir_obs) in enumerate(zip(obx_data, fhir_observations))
+            ]
+
+            patient_fhir_id = persist_message(
+                mr_number=mr_number,
+                fhir_patient=fhir_patient,
+                message_control_id=message_control_id,
+                observations=obs_payloads,
+            )
 
             print(f"  VALID - patient saved (id={patient_fhir_id}), {len(fhir_observations)} observation(s) saved")
             valid += 1
