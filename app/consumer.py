@@ -86,20 +86,20 @@ def process_message(channel, method, properties, body: bytes):
             fhir_observations = obx_list_to_fhir_observations(obx_data)
 
             # save
-            patient_id = pid_data.get("patient_id", "")
+            mr_number          = pid_data.get("patient_id", "")
             message_control_id = pid_data.get("message_control_id", "")
-            insert_patient(patient_id, fhir_patient)
+            patient_fhir_id    = insert_patient(mr_number, fhir_patient)
 
             for obs, fhir_obs in zip(obx_data, fhir_observations):
                 insert_observation(
-                    patient_id=patient_id,
+                    patient_fhir_id=patient_fhir_id,
                     message_control_id=message_control_id,
                     loinc_code=obs.get("loinc_code", ""),
                     description=obs.get("description", ""),
                     fhir_obs=fhir_obs,
                 )
 
-            print(f"  VALID - patient {patient_id}, {len(fhir_observations)} observation(s) saved")
+            print(f"  VALID - patient {mr_number} (id={patient_fhir_id}), {len(fhir_observations)} observation(s) saved")
             _stats["valid"] += 1
 
     except Exception as e:
