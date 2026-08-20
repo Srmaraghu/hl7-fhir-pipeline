@@ -72,7 +72,7 @@ def run():
                     raw = f.read()
 
                 insert_dead_letter(filename, reason_code, raw)
-                print(f"  ✗ INVALID — {full_reason}")
+                print(f"  INVALID - {full_reason}")
                 invalid += 1
                 errors.append((filename, reason_code, full_reason))
                 continue
@@ -95,7 +95,7 @@ def run():
                     fhir_obs=fhir_obs,
                 )
 
-            print(f"  ✓ VALID   — patient {patient_id}, {len(fhir_observations)} observation(s) saved")
+            print(f"  VALID - patient {patient_id}, {len(fhir_observations)} observation(s) saved")
             valid += 1
 
         except Exception as e:
@@ -108,7 +108,7 @@ def run():
                 insert_dead_letter(filename, reason_code, raw)
             except Exception:
                 pass
-            print(f"  ✗ ERROR   — {full_reason}")
+            print(f"  ERROR - {full_reason}")
             invalid += 1
             errors.append((filename, reason_code, full_reason))
 
@@ -123,8 +123,8 @@ def run():
     if errors:
         print(f"\n  Failed files:")
         for filename, reason_code, full_reason in errors:
-            print(f"    ✗ {filename}")
-            print(f"      → [{reason_code}] {full_reason.split(':', 1)[-1].strip()}")
+            print(f"    {filename}")
+            print(f"      [{reason_code}] {full_reason.split(':', 1)[-1].strip()}")
 
     print(f"{'=' * 60}")
 
