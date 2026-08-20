@@ -19,7 +19,7 @@ import glob
 import os
 
 from app.parser import parse_hl7_file
-from app.transformer import pid_to_fhir_patient, obx_list_to_fhir_observations
+from app.transformer import pid_to_fhir_patient, obx_list_to_fhir_observations, build_obs_payloads
 from app.validator import validate, extract_reason_code
 from app.database import (
     create_tables,
@@ -83,16 +83,7 @@ def run():
             # Step 4: save to DB — single transaction for the whole message
             mr_number          = pid_data.get("patient_id", "")
             message_control_id = pid_data.get("message_control_id", "")
-
-            obs_payloads = [
-                {
-                    "fhir_obs":    fhir_obs,
-                    "loinc_code":  obs.get("loinc_code", ""),
-                    "obx_sequence": obs.get("obx_sequence", str(i + 1)),
-                    "description": obs.get("description", ""),
-                }
-                for i, (obs, fhir_obs) in enumerate(zip(obx_data, fhir_observations))
-            ]
+            obs_payloads       = build_obs_payloads(obx_data, fhir_observations)
 
             patient_fhir_id = persist_message(
                 mr_number=mr_number,

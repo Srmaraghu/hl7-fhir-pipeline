@@ -69,6 +69,11 @@ def create_tables():
             CREATE INDEX IF NOT EXISTS idx_patients_resource
             ON patients USING GIN (resource);
         """)
+        # expression index for fast MR-number lookup used by persist_message()
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_patients_mr_number
+            ON patients ((resource->'identifier'->0->>'value'));
+        """)
 
         # ── observations: matches fhir-patient-api/init.sql exactly ──────────
         # obx_sequence (OBX-1) added to the conflict key so two observations

@@ -142,6 +142,25 @@ def obx_list_to_fhir_observations(obx_list: List[dict]) -> List[dict]:
     return [obx_to_fhir_observation(obs) for obs in obx_list]
 
 
+def build_obs_payloads(obx_data: List[dict], fhir_observations: List[dict]) -> List[dict]:
+    """
+    Pair parsed OBX dicts with their FHIR Observation dicts into the payload
+    format expected by database.persist_message().
+
+    Uses strict=True so a length mismatch raises immediately rather than
+    silently dropping observations.
+    """
+    return [
+        {
+            "fhir_obs":     fhir_obs,
+            "loinc_code":   obs.get("loinc_code", ""),
+            "obx_sequence": obs.get("obx_sequence", str(i + 1)),
+            "description":  obs.get("description", ""),
+        }
+        for i, (obs, fhir_obs) in enumerate(zip(obx_data, fhir_observations, strict=True))
+    ]
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _build_given_names(pid: dict) -> list:
