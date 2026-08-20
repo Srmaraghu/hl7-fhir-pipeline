@@ -10,5 +10,14 @@ services:
     volumes:
       - hl7_pg_data:/var/lib/postgresql/data
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"    # AMQP protocol port (used by producer/consumer)
+      - "15672:15672"  # management UI — visit http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
 volumes:
   hl7_pg_data:
