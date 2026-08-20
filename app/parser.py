@@ -30,7 +30,12 @@ def parse_hl7_file(filepath: str) -> tuple:
     # Use QUIET validation so unknown fields don't raise errors
     msg = parse_message(raw, validation_level=VALIDATION_LEVEL.QUIET)
 
+    # MSH-10: message control ID — unique ID for this message, used for deduplication
+    message_control_id = _safe(lambda: msg.msh.msh_10.value)
+
     pid_data = _parse_pid(msg)
+    pid_data["message_control_id"] = message_control_id
+
     obx_data = parse_obx_segments(msg)
 
     return pid_data, obx_data
