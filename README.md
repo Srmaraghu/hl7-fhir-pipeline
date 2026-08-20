@@ -6,25 +6,6 @@ A healthcare data engineering pipeline that ingests HL7 v2 ADT messages, validat
 
 This pipeline is the **write side** of a healthcare data platform. It pairs with [fhir-patient-api](https://github.com/Srmaraghu/fhir-patient-api) which is the **read side** — a FHIR REST API that serves the same data.
 
-```
-HL7 v2 message (.hl7 file)
-          ↓
-  hl7-fhir-pipeline        ← YOU ARE HERE
-  (parse, validate,
-   transform, write)
-          ↓
-     PostgreSQL
-     (fhirdb)
-      patients
-    observations
-          ↓
-  fhir-patient-api         ← github.com/Srmaraghu/fhir-patient-api
-  (FHIR REST API,
-   read/serve)
-          ↓
-GET /Patient/{id}
-GET /Observation?patient={id}
-```
 
 Both projects share the same `fhirdb` PostgreSQL database and the same table schema — so HL7 ingested by the pipeline is immediately queryable through the REST API. They use different connection libraries (psycopg vs asyncpg) but write to the same tables in the same format.
 
