@@ -94,6 +94,9 @@ def parse_obx_segments(msg) -> List[dict]:
     for segment in msg.children:
         if segment.name == "OBX":
             obs = {
+                # OBX-1: set ID — sequence number within this message (1, 2, 3...)
+                "obx_sequence": _safe(lambda s=segment: s.obx_1.value),
+
                 # OBX-2: value type (NM = numeric, ST = string, etc.)
                 "value_type":   _safe(lambda s=segment: s.obx_2.value),
 
