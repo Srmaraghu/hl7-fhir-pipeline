@@ -18,9 +18,15 @@ hl7_analytics:
       port: 5432
       dbname: fhirdb
       user: fhiruser
-      password: fhirpassword
+      password: "{{ env_var('DBT_ENV_SECRET_FHIRDB_PASSWORD') }}"
       schema: analytics
       threads: 4
+```
+
+Set the password before running dbt:
+
+```bash
+export DBT_ENV_SECRET_FHIRDB_PASSWORD=fhirpassword
 ```
 
 ## Source Tables

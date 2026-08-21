@@ -13,7 +13,7 @@ select
     o.reference_range
 
 from {{ ref('stg_observations') }} o
--- inner join: observations without a valid patient are not analytically useful
--- this also aligns with the not_null + relationships tests on patient_id
-inner join {{ ref('stg_patients') }} p
+-- left join: retain all observations including those with unmatched patient_id
+-- so analysts can detect orphaned observations rather than losing them silently
+left join {{ ref('stg_patients') }} p
     on o.patient_id = p.patient_id

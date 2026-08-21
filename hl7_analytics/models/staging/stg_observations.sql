@@ -5,9 +5,10 @@ select
     resource -> 'code' -> 'coding' -> 0 ->> 'code'                  as loinc_code,
     resource ->> 'status'                                           as status,
 
-    -- guard against non-numeric free-text values before casting
+    -- guard against non-numeric free-text values including exponent notation (e.g. 5.4e-3)
     case
-        when resource -> 'valueQuantity' ->> 'value' ~ '^-?[0-9]+(\.[0-9]+)?$'
+        when resource -> 'valueQuantity' ->> 'value'
+            ~ '^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$'
         then (resource -> 'valueQuantity' ->> 'value')::numeric
         else null
     end                                                             as value,
