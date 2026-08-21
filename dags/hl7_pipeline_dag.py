@@ -23,6 +23,7 @@ import pendulum
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.operators.bash import BashOperator
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -251,5 +252,18 @@ with DAG(
         python_callable=report_summary,
     )
 
+    t5_dbt_run = BashOperator(
+        task_id="dbt_run",
+        bash_command="cd /opt/airflow/dbt/hl7_analytics && dbt run && dbt test",
+        env={
+            "DBT_PROFILES_DIR": "/opt/airflow/dbt/hl7_analytics",
+            "DB_HOST": "db",
+            "DB_PORT": "5432",
+            "DB_NAME": "fhirdb",
+            "DB_USER": "fhiruser",
+            "DB_PASSWORD": "fhirpassword",
+        },
+    )
+
     # ── task order (>> means "then run") ──────────────────────────────────────
-    t1_setup >> t2_ingest >> t3_check >> t4_report
+    t1_setup >> t2_ingest >> t3_check >> t5_dbt_run >> t4_report

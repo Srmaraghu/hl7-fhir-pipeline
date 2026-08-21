@@ -49,6 +49,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./app:/opt/airflow/app
       - ./data:/opt/airflow/data
+      - ./hl7_analytics:/opt/airflow/dbt/hl7_analytics
       - ./requirements-airflow.txt:/requirements-airflow.txt
     entrypoint: /bin/bash
     command:
