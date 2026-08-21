@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: stg_patients
+    columns:
+      - name: patient_id
+        tests:
+          - unique
+          - not_null
+
+  - name: stg_observations
+    columns:
+      - name: observation_id
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_observations
+    columns:
+      - name: observation_id
+        tests:
+          - unique
+          - not_null
+      - name: patient_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_patients')
+                field: patient_id

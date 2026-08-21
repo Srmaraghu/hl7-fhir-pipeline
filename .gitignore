@@ -6,4 +6,6 @@ __pycache__/
 .DS_Store
 *.egg-info/
 EXPLAINER.md
+logs/
+dbt/
 .pytest_cache
