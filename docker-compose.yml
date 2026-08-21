@@ -13,11 +13,72 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     ports:
-      - "5672:5672"    # AMQP protocol port (used by producer/consumer)
-      - "15672:15672"  # management UI — visit http://localhost:15672
+      - "5672:5672"
+      - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
+
+  # ── Airflow shared config ─────────────────────────────────────────────────
+  # Three separate containers: init (runs once), scheduler, webserver
+  # Visit http://localhost:8080  (user: airflow / pass: airflow)
+
+  airflow-init:
+    image: apache/airflow:2.10.4
+    depends_on:
+      - db
+    environment: &airflow-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://fhiruser:fhirpassword@db:5432/fhirdb
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "local-dev-only"
+      PYTHONPATH: /opt/airflow
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: fhirdb
+      DB_USER: fhiruser
+      DB_PASSWORD: fhirpassword
+    volumes: &airflow-volumes
+      - ./dags:/opt/airflow/dags
+      - ./app:/opt/airflow/app
+      - ./data:/opt/airflow/data
+      - ./requirements-airflow.txt:/requirements-airflow.txt
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username airflow \
+          --password airflow \
+          --firstname Air \
+          --lastname Flow \
+          --role Admin \
+          --email airflow@example.com
+    restart: "no"
+
+  airflow-scheduler:
+    image: apache/airflow:2.10.4
+    depends_on:
+      - airflow-init
+      - db
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    command: bash -c "pip install -r /requirements-airflow.txt -q && airflow scheduler"
+    restart: unless-stopped
+
+  airflow-webserver:
+    image: apache/airflow:2.10.4
+    depends_on:
+      - airflow-init
+      - db
+    environment: *airflow-env
+    volumes: *airflow-volumes
+    ports:
+      - "8080:8080"
+    command: bash -c "pip install -r /requirements-airflow.txt -q && airflow webserver"
+    restart: unless-stopped
 
 volumes:
   hl7_pg_data:
