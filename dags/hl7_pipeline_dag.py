@@ -19,9 +19,10 @@ import glob
 import os
 from datetime import timedelta
 
+import pendulum
+
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.utils.dates import days_ago
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -221,7 +222,7 @@ default_args = {
 with DAG(
     dag_id="hl7_fhir_pipeline",
     description="HL7 v2 → FHIR → PostgreSQL ingestion pipeline",
-    start_date=days_ago(1),                    # relative — avoids stale fixed dates
+    start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     schedule="@daily",
     catchup=False,
     default_args=default_args,
