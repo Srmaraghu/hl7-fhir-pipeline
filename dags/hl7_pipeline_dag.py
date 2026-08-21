@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import glob
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.utils.dates import days_ago
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -111,14 +112,22 @@ def ingest_hl7_files(**context):
             valid += 1
 
         except Exception as e:
-            print(f"  ERROR - {filename}: {e}")
+            # only dead-letter parse/validation failures — let DB/transform
+            # errors propagate so Airflow can retry the task
+            from app.database import insert_dead_letter
+            from app.parser import parse_hl7_file as _parse  # already imported above
             try:
                 with open(filepath, "r") as f:
                     raw = f.read()
                 insert_dead_letter(filename, "PARSE_ERROR", raw)
-            except Exception:
-                pass
-            invalid += 1
+                print(f"  ERROR - {filename}: {e}")
+                invalid += 1
+            except Exception as inner:
+                # dead-letter insert itself failed — re-raise original so
+                # Airflow retries the whole task
+                raise RuntimeError(
+                    f"Failed to dead-letter {filename}: {inner}"
+                ) from e
 
     summary = {"total": total, "valid": valid, "invalid": invalid}
     print(f"[DAG] Ingestion done: {summary}")
@@ -142,6 +151,12 @@ def check_dead_letter(**context):
         task_ids="ingest_hl7_files",
         key="summary",
     )
+
+    if not summary:
+        raise ValueError(
+            "No summary found in XCom — ingest_hl7_files may not have run or failed "
+            "before pushing stats. Check upstream task logs."
+        )
 
     total   = summary.get("total", 0)
     invalid = summary.get("invalid", 0)
@@ -177,6 +192,10 @@ def report_summary(**context):
         key="summary",
     )
 
+    if not summary:
+        print("[DAG] No summary available — upstream task may not have produced results.")
+        return
+
     total   = summary.get("total", 0)
     valid   = summary.get("valid", 0)
     invalid = summary.get("invalid", 0)
@@ -200,13 +219,13 @@ default_args = {
 }
 
 with DAG(
-    dag_id="hl7_fhir_pipeline",               # unique name shown in Airflow UI
+    dag_id="hl7_fhir_pipeline",
     description="HL7 v2 → FHIR → PostgreSQL ingestion pipeline",
-    start_date=datetime(2026, 1, 1),           # when the DAG is valid from
-    schedule="@daily",                         # run once a day (or trigger manually)
-    catchup=False,                             # don't run for past dates we missed
+    start_date=days_ago(1),                    # relative — avoids stale fixed dates
+    schedule="@daily",
+    catchup=False,
     default_args=default_args,
-    tags=["healthcare", "hl7", "fhir"],        # shown in Airflow UI for filtering
+    tags=["healthcare", "hl7", "fhir"],
 ) as dag:
 
     # ── tasks ─────────────────────────────────────────────────────────────────
