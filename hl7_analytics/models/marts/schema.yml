@@ -25,5 +25,6 @@ models:
         tests:
           - not_null
           - relationships:
-              to: ref('stg_patients')
-              field: patient_id
+              arguments:
+                to: ref('stg_patients')
+                field: patient_id
