@@ -8,4 +8,6 @@ __pycache__/
 EXPLAINER.md
 logs/
 dbt/
+hl7_analytics/.user.yml
+hl7_analytics/target/
 .pytest_cache
