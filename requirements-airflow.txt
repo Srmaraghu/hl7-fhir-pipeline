@@ -1,5 +1,9 @@
 hl7apy==1.3.4
-psycopg[binary]
+# psycopg v3 — used by app/database.py
+psycopg[binary]==3.2.9
+# psycopg2-binary — used by Airflow's postgresql+psycopg2 SQLAlchemy conn and dbt-postgres
+psycopg2-binary==2.9.10
 python-dotenv==1.0.1
 pika==1.3.2
+dbt-core==1.8.0
 dbt-postgres==1.8.0

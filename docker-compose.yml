@@ -24,12 +24,13 @@ services:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
 
-  # ── Airflow shared config ─────────────────────────────────────────────────
-  # Three separate containers: init (runs once), scheduler, webserver
+  # ── Airflow ───────────────────────────────────────────────────────────────
+  # Custom image bakes in all deps (hl7apy, dbt-postgres, pika, etc.)
+  # so containers don't pip-install on every startup.
   # Visit http://localhost:8080  (user: airflow / pass: airflow)
 
   airflow-init:
-    image: apache/airflow:2.11.1
+    build: .
     depends_on:
       db:
         condition: service_healthy
@@ -50,7 +51,6 @@ services:
       - ./app:/opt/airflow/app
       - ./data:/opt/airflow/data
       - ./hl7_analytics:/opt/airflow/dbt/hl7_analytics
-      - ./requirements-airflow.txt:/requirements-airflow.txt
     entrypoint: /bin/bash
     command:
       - -c
@@ -67,7 +67,7 @@ services:
     restart: "no"
 
   airflow-scheduler:
-    image: apache/airflow:2.11.1
+    build: .
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -75,11 +75,11 @@ services:
         condition: service_healthy
     environment: *airflow-env
     volumes: *airflow-volumes
-    command: bash -c "pip install -r /requirements-airflow.txt -q && airflow scheduler"
+    command: scheduler
     restart: unless-stopped
 
   airflow-webserver:
-    image: apache/airflow:2.11.1
+    build: .
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -89,7 +89,7 @@ services:
     volumes: *airflow-volumes
     ports:
       - "8080:8080"
-    command: bash -c "pip install -r /requirements-airflow.txt -q && airflow webserver"
+    command: webserver
     restart: unless-stopped
 
 volumes:

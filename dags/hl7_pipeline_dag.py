@@ -23,7 +23,6 @@ import pendulum
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.operators.bash import BashOperator
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +33,50 @@ INBOX = os.path.join(
 
 # If more than this % of messages fail, fail the whole DAG run
 DEAD_LETTER_THRESHOLD_PCT = 30
+
+
+def run_dbt(**context):
+    """
+    Task 4: Run dbt models and tests using dbt's Python API.
+    Uses dbtRunner directly — no shell, no PATH issues.
+    """
+    import os
+    from dbt.cli.main import dbtRunner, dbtRunnerResult
+
+    dbt_project_dir = "/opt/airflow/dbt/hl7_analytics"
+
+    os.environ.update({
+        "DBT_PROFILES_DIR": dbt_project_dir,
+        "DB_HOST": "db",
+        "DB_PORT": "5432",
+        "DB_NAME": "fhirdb",
+        "DB_USER": "fhiruser",
+        "DB_PASSWORD": "fhirpassword",
+    })
+
+    dbt = dbtRunner()
+
+    # dbt run
+    run_result: dbtRunnerResult = dbt.invoke([
+        "run",
+        "--project-dir", dbt_project_dir,
+        "--profiles-dir", dbt_project_dir,
+    ])
+    if not run_result.success:
+        raise RuntimeError(f"dbt run failed: {run_result.exception}")
+
+    print("[DAG] dbt run completed successfully")
+
+    # dbt test
+    test_result: dbtRunnerResult = dbt.invoke([
+        "test",
+        "--project-dir", dbt_project_dir,
+        "--profiles-dir", dbt_project_dir,
+    ])
+    if not test_result.success:
+        raise RuntimeError(f"dbt test failed: {test_result.exception}")
+
+    print("[DAG] dbt test completed successfully")
 
 
 # ── task functions ────────────────────────────────────────────────────────────
@@ -252,17 +295,9 @@ with DAG(
         python_callable=report_summary,
     )
 
-    t5_dbt_run = BashOperator(
+    t5_dbt_run = PythonOperator(
         task_id="dbt_run",
-        bash_command="cd /opt/airflow/dbt/hl7_analytics && dbt run && dbt test",
-        env={
-            "DBT_PROFILES_DIR": "/opt/airflow/dbt/hl7_analytics",
-            "DB_HOST": "db",
-            "DB_PORT": "5432",
-            "DB_NAME": "fhirdb",
-            "DB_USER": "fhiruser",
-            "DB_PASSWORD": "fhirpassword",
-        },
+        python_callable=run_dbt,
     )
 
     # ── task order (>> means "then run") ──────────────────────────────────────
